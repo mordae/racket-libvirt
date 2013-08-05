@@ -393,6 +393,10 @@
     (call-info (structure)
                (structure (array uint 32) long int int int int int int))
 
+    'connect-get-sysinfo
+    (call-info (structure uint)
+               (structure remote-nonnull-string))
+
     'auth-list
     (call-info (structure)
                (structure (array* remote-auth-type 20)))))

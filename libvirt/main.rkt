@@ -115,6 +115,12 @@
                 'threads threads)))
 
 
+    ;; Returns XML system info description.
+    (define/public (system-info)
+      (let-values (((sysinfo) (remote-call 'connect-get-sysinfo 0)))
+        (->s sysinfo)))
+
+
     ;; Incoming message reader.
     (define (reader-main)
       (let* ((len    (integer-bytes->integer (read-bytes 4 in) #t #t))
