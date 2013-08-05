@@ -389,6 +389,9 @@
     (call-info (structure)
                (structure))
 
+    'node-get-info
+    (call-info (structure)
+               (structure (array uint 32) long int int int int int int))
 
     'auth-list
     (call-info (structure)

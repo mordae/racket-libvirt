@@ -101,6 +101,20 @@
         (void)))
 
 
+    ;; High-level hypervisor information.
+    (define/public (node-info)
+      (let-values (((model memory cpus mhz nodes sockets cores threads)
+                    (remote-call 'node-get-info)))
+        (hasheq 'model   (->s (list->bytes model))
+                'memory  memory
+                'cpus    cpus
+                'mhz     mhz
+                'nodes   nodes
+                'sockets sockets
+                'cores   cores
+                'threads threads)))
+
+
     ;; Incoming message reader.
     (define (reader-main)
       (let* ((len    (integer-bytes->integer (read-bytes 4 in) #t #t))
