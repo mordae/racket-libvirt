@@ -95,7 +95,8 @@
                           (load/bytes (call-info-ret info) body))))))
 
 
-    (define/public (open target)
+    ;; Attach to hypervisor management.
+    (define/public (open (target "qemu:///system"))
       (let-values ((() (remote-call 'connect-open (->b target) 0)))
         (void)))
 
@@ -125,6 +126,7 @@
     ;; Suspend the background thread and forget both ports.
     ;; It is an error to call anything else after closing the client.
     (define/public (close)
+      (remote-call 'connect-close)
       (thread-suspend reader)
       (set! in #f)
       (set! out #f))

@@ -385,6 +385,11 @@
     (call-info (structure remote-string uint)
                (structure))
 
+    'connect-close
+    (call-info (structure)
+               (structure))
+
+
     'auth-list
     (call-info (structure)
                (structure (array* remote-auth-type 20)))))
