@@ -115,10 +115,10 @@
                 'threads threads)))
 
 
-    ;; Returns XML system info description.
+    ;; Returns xexpr with system info.
     (define/public (system-info)
       (let-values (((sysinfo) (remote-call 'connect-get-sysinfo 0)))
-        (->s sysinfo)))
+        (->x (->s sysinfo))))
 
 
     ;; Incoming message reader.
