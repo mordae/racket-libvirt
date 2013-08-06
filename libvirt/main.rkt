@@ -16,7 +16,8 @@
 
 
 ;; Our custom exception type.
-(define-struct (exn:fail:libvirt exn:fail) ())
+(define-struct (exn:fail:libvirt exn:fail)
+  (details))
 
 
 ;; Libvirt RPC client.
@@ -36,10 +37,9 @@
 
     ;; Raises a libvirt exception using specified error vector.
     (define (libvirt-error err)
-      (raise (exn:fail:libvirt (format "~s" err)
-                               (current-continuation-marks))))
-;      (raise (exn:fail:libvirt (vector-ref err 2)
-;                               (current-continuation-marks))))
+      (raise (exn:fail:libvirt (->s (vector-ref err 2))
+                               (current-continuation-marks)
+                               err)))
 
 
     ;; Create remote call header.
