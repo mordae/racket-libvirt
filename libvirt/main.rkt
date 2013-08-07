@@ -81,18 +81,27 @@
       (flush-output out)
 
       ;; Wait for the reply.
-      (let-values (((status body)
-                    (apply values (channel-get response-channel))))
-        ;; Remove the pending call.
-        (hash-remove! pending-calls (vector-ref header 4))
+      (let ((result (sync (get-field reader this) response-channel)))
+        (cond
+          ;; The background thread might have died in the meantime.
+          ;; We need to inform the caller.
+          ((thread? result)
+           (raise (exn:fail:libvirt "libvirtd closed the connection"
+                                    (current-continuation-marks) #f)))
 
-        (if (eq? status 'error)
-          ;; Convert error response to an exception.
-          (libvirt-error (load/bytes remote-error body))
+          (else
+           ;; In the more probable case of our success, process the result.
+           (let-values (((status body) (apply values result)))
+             ;; Remove the pending call.
+             (hash-remove! pending-calls (vector-ref header 4))
 
-          ;; Decode successfull response as method return type.
-          (apply values (vector->list
-                          (load/bytes (call-info-ret info) body))))))
+             (if (eq? status 'error)
+               ;; Convert error response to an exception.
+               (libvirt-error (load/bytes remote-error body))
+
+               ;; Decode successfull response as method return type.
+               (apply values (vector->list
+                               (load/bytes (call-info-ret info) body)))))))))
 
 
     ;; Attach to hypervisor management.
