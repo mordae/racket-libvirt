@@ -17,7 +17,15 @@
 
 ;; Our custom exception type.
 (define-struct (exn:fail:libvirt exn:fail)
+  ())
+
+;; Exception for remote procedure call errors.
+(define-struct (exn:fail:libvirt:error exn:fail:libvirt)
   (details))
+
+;; Exception for network problems.
+(define-struct (exn:fail:libvirt:connection exn:fail:libvirt)
+  ())
 
 
 ;; Libvirt RPC client.
@@ -37,9 +45,9 @@
 
     ;; Raises a libvirt exception using specified error vector.
     (define (libvirt-error err)
-      (raise (exn:fail:libvirt (->s (vector-ref err 2))
-                               (current-continuation-marks)
-                               err)))
+      (raise (exn:fail:libvirt:error (->s (vector-ref err 2))
+                                     (current-continuation-marks)
+                                     err)))
 
 
     ;; Create remote call header.
@@ -86,8 +94,9 @@
           ;; The background thread might have died in the meantime.
           ;; We need to inform the caller.
           ((thread? result)
-           (raise (exn:fail:libvirt "libvirtd closed the connection"
-                                    (current-continuation-marks) #f)))
+           (raise (exn:fail:libvirt:connection
+                    "libvirtd closed the connection"
+                    (current-continuation-marks) #f)))
 
           (else
            ;; In the more probable case of our success, process the result.
