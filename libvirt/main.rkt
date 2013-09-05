@@ -32,6 +32,45 @@
   ())
 
 
+(define (write-failed (exn #f))
+  (throw exn:fail:libvirt:connection
+         'libvirt "server closed our connection during write"))
+
+
+(define (read-failed (exn #f))
+  (throw exn:fail:libvirt:connection
+         'libvirt "server closed our connection during read"))
+
+
+;; Read bytes from given input port or throw an exception if
+;; given amount could not be read or end of file have been reached.
+(define/contract (read-bytes/safe amt in)
+                 (-> exact-nonnegative-integer? input-port? bytes?)
+  (with-handlers ((exn:fail? read-failed))
+    (let ((bstr (read-bytes amt in)))
+      (when (or (eof-object? bstr) (< (bytes-length bstr) amt))
+        (read-failed))
+      bstr)))
+
+
+;; Write bytes to given port or throw an exception if
+;; given amount could not be written.
+(define/contract (write-bytes/safe bstr out)
+                 (-> bytes? output-port? exact-nonnegative-integer?)
+  (with-handlers ((exn:fail? write-failed))
+    (let ((amt (write-bytes bstr out)))
+      (when (> (bytes-length bstr) amt)
+        (write-failed))
+      amt)))
+
+
+;; Flush output port or throw an exception if port is closed.
+(define/contract (flush-output/safe out)
+                 (-> output-port? void?)
+  (with-handlers ((exn:fail? write-failed))
+    (flush-output out)))
+
+
 ;; Object encapsulating wire connection details such as framing and
 ;; request/reply matching.  Built around a tandem object.
 (define libvirt-connection%
@@ -66,17 +105,17 @@
                                      (list->vector args))))
 
          ;; Send packet length and the packet itself.
-         (write-bytes
+         (write-bytes/safe
            (integer->integer-bytes (+ 4 (bytes-length packet)) 4 #t #t) out)
-         (write-bytes packet out)
-         (flush-output out))))
+         (write-bytes/safe packet out)
+         (flush-output/safe out))))
 
 
     ;; Receive a single message.
     (define/private (receive)
-      (let* ((len    (integer-bytes->integer (read-bytes 4 in) #t #t))
-             (header (load/bytes message-header (read-bytes 24 in)))
-             (body   (read-bytes (- len 28) in)))
+      (let* ((len    (integer-bytes->integer (read-bytes/safe 4 in) #t #t))
+             (header (load/bytes message-header (read-bytes/safe 24 in)))
+             (body   (read-bytes/safe (- len 28) in)))
         (let-values (((prog vers method type serial status)
                       (apply values (vector->list header))))
           (match type
