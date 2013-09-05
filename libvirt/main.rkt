@@ -4,12 +4,16 @@
 ;
 
 (require racket/contract
+         racket/generator
          racket/function
+         racket/match
          racket/class
          racket/dict
+         tandem
          xdr)
 
-(require "private/protocol.rkt"
+(require "private/common.rkt"
+         "private/protocol.rkt"
          "private/util.rkt")
 
 (provide (all-defined-out))
@@ -21,11 +25,97 @@
 
 ;; Exception for remote procedure call errors.
 (define-struct (exn:fail:libvirt:error exn:fail:libvirt)
-  (details))
+  ())
 
 ;; Exception for network problems.
 (define-struct (exn:fail:libvirt:connection exn:fail:libvirt)
   ())
+
+
+;; Object encapsulating wire connection details such as framing and
+;; request/reply matching.  Built around a tandem object.
+(define libvirt-connection%
+  (class object%
+    ;; Input and output ports for communication with the server.
+    (init-field in out)
+
+    ;; Tandem object takes care of request/reply matching and
+    ;; distributes work among interested threads without separate
+    ;; background worker.
+    (field (work (tandem (lambda (tag value)
+                           (transmit tag value))
+                         (lambda ()
+                           (receive)))))
+
+
+    ;; Transmit a single procedure call.
+    (define/private (transmit serial args)
+      (match args
+        ((list type method args ...)
+         ;; Create new message header with specified serial number.
+         (define header
+           (vector remote-program remote-version method type serial 'ok))
+
+         ;; Lookup information about the remote procedure.
+         (define info (dict-ref remote-calls method))
+
+         ;; Serialize both message header and the body in one packet.
+         (define packet
+           (bytes-append (dump/bytes message-header header)
+                         (dump/bytes (call-info-args info)
+                                     (list->vector args))))
+
+         ;; Send packet length and the packet itself.
+         (write-bytes
+           (integer->integer-bytes (+ 4 (bytes-length packet)) 4 #t #t) out)
+         (write-bytes packet out)
+         (flush-output out))))
+
+
+    ;; Receive a single message.
+    (define/private (receive)
+      (let* ((len    (integer-bytes->integer (read-bytes 4 in) #t #t))
+             (header (load/bytes message-header (read-bytes 24 in)))
+             (body   (read-bytes (- len 28) in)))
+        (let-values (((prog vers method type serial status)
+                      (apply values (vector->list header))))
+          (match type
+            ('reply
+             (let* ((type   (call-info-ret (dict-ref remote-calls method)))
+                    (serial (vector-ref header 4))
+                    (status (vector-ref header 5))
+                    (value  (match status
+                              ('ok    (load/bytes type body))
+                              ('error (load/bytes remote-error body)))))
+                 (values serial (cons status value))))
+
+            (else
+             (printf "unexpected ~a (~a ~a ~a)\n" type method serial status)
+             (receive))))))
+
+
+    ;; Infinite sequence of serial numbers for messages.
+    (define next-serial
+      (synchronized
+        (generator ()
+          (for ((i (in-naturals 1)))
+            (yield i)))))
+
+
+    ;; Perform remote method call.
+    (define/public (remote-call method . args)
+      (let ((serial (next-serial)))
+        (match (tandem-call work serial (list* 'call method args))
+          ((cons status value)
+           (match status
+             ('ok    (vector->values value))
+             ('error (throw exn:fail:libvirt:error
+                            method "remote procedure call failed"
+                                   "reason" (vector-ref value 2))))))))
+
+
+    ;; Initialize the parent class.
+    (super-new)))
 
 
 ;; Libvirt RPC client.
@@ -34,89 +124,19 @@
     ;; Input and output ports for communication with the server.
     (init-field in out)
 
-
-    ;; Serial number of the last RPC call.
-    (field (serial 0))
-
-
-    ;; Table of pending RPC calls, keyed by their serial numbers.
-    (field (pending-calls (make-hash)))
+    ;; Connection is realized in a separate class.
+    (field (connection
+             (new libvirt-connection% (in in) (out out))))
 
 
-    ;; Raises a libvirt exception using specified error vector.
-    (define (libvirt-error err)
-      (raise (exn:fail:libvirt:error (->str (vector-ref err 2))
-                                     (current-continuation-marks)
-                                     err)))
-
-
-    ;; Create remote call header.
-    (define (remote-call-header method)
-      (set! serial (add1 serial))
-      (vector remote-program remote-version method 'call serial 'ok))
-
-
-    ;; Perform remote method call.
-    (define (remote-call method . args)
-      ;; Create new message header with unique serial number.
-      (define header (remote-call-header method))
-
-      ;; Lookup information about the remote call arguments and return values.
-      (define info (dict-ref remote-calls method))
-
-      ;; Serialize the outgoing message body as procedure arguments.
-      (define body (dump/bytes (call-info-args info) (list->vector args)))
-
-      ;; Serialize message header.
-      (define head (dump/bytes message-header header))
-
-      ;; Create the outgoing packet by combining head and body.
-      (define packet (bytes-append head body))
-
-      ;; Prepare channel for response.
-      (define response-channel (make-channel))
-
-      ;; Register asynchronous callback that will receive the reply.
-      (hash-set! pending-calls (vector-ref header 4)
-                 (lambda args
-                   (channel-put response-channel args)))
-
-
-      ;; Write the outgoing packet length and the packet itself.
-      (write-bytes
-        (integer->integer-bytes (+ 4 (bytes-length packet)) 4 #t #t) out)
-      (write-bytes packet out)
-      (flush-output out)
-
-      ;; Wait for the reply.
-      (let ((result (sync (get-field reader this) response-channel)))
-        (cond
-          ;; The background thread might have died in the meantime.
-          ;; We need to inform the caller.
-          ((thread? result)
-           (raise (exn:fail:libvirt:connection
-                    "libvirtd closed the connection"
-                    (current-continuation-marks) #f)))
-
-          (else
-           ;; In the more probable case of our success, process the result.
-           (let-values (((status body) (apply values result)))
-             ;; Remove the pending call.
-             (hash-remove! pending-calls (vector-ref header 4))
-
-             (if (eq? status 'error)
-               ;; Convert error response to an exception.
-               (libvirt-error (load/bytes remote-error body))
-
-               ;; Decode successfull response as method return type.
-               (apply values (vector->list
-                               (load/bytes (call-info-ret info) body)))))))))
+    ;; Forward remote call to the connection instance.
+    (define/private (remote-call method . args)
+      (apply dynamic-send connection 'remote-call method args))
 
 
     ;; Attach to hypervisor management.
     (define/public (open (target "qemu:///system"))
-      (let-values ((() (remote-call 'connect-open (->bstr target) 0)))
-        (void)))
+      (remote-call 'connect-open (->bstr target) 0))
 
 
     ;; High-level hypervisor information.
@@ -137,37 +157,6 @@
     (define/public (system-info)
       (let-values (((sysinfo) (remote-call 'connect-get-sysinfo 0)))
         (->xexpr (->str sysinfo))))
-
-
-    ;; Incoming message reader.
-    (define (reader-main)
-      (let* ((len    (integer-bytes->integer (read-bytes 4 in) #t #t))
-             (header (load/bytes message-header (read-bytes 24 in)))
-             (body   (read-bytes (- len 28) in)))
-        (let-values (((prog vers method type serial status)
-                      (apply values (vector->list header))))
-          (cond
-            ((eq? type 'reply)
-             ((hash-ref pending-calls serial) status body))
-
-            (else
-             (printf "unexpected ~a (~a ~a ~a)\n"
-                     type method serial status)))))
-      (reader-main))
-
-
-    ;; Create background thread that will read messages from libvirt
-    ;; and deliver them to pending calls or callbacks.
-    (field (reader (thread reader-main)))
-
-
-    ;; Suspend the background thread and forget both ports.
-    ;; It is an error to call anything else after closing the client.
-    (define/public (close)
-      (remote-call 'connect-close)
-      (thread-suspend reader)
-      (set! in #f)
-      (set! out #f))
 
 
     ;; Initialize the parent class.
