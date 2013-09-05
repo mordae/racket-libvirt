@@ -11,15 +11,15 @@
 
 
 ;; String encoding shortcuts.
-(define (->b str)
+(define (->bstr str)
   (string->bytes/utf-8 str))
 
-(define (->s bstr)
+(define (->str bstr)
   (string-trim (bytes->string/utf-8 bstr) #rx"\u0000+"))
 
 
 ;; xexpr encoding shortcut.
-(define (->x str)
+(define (->xexpr str)
   (xexpr-strip-whitespace (string->xexpr str)))
 
 

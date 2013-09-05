@@ -45,7 +45,7 @@
 
     ;; Raises a libvirt exception using specified error vector.
     (define (libvirt-error err)
-      (raise (exn:fail:libvirt:error (->s (vector-ref err 2))
+      (raise (exn:fail:libvirt:error (->str (vector-ref err 2))
                                      (current-continuation-marks)
                                      err)))
 
@@ -115,7 +115,7 @@
 
     ;; Attach to hypervisor management.
     (define/public (open (target "qemu:///system"))
-      (let-values ((() (remote-call 'connect-open (->b target) 0)))
+      (let-values ((() (remote-call 'connect-open (->bstr target) 0)))
         (void)))
 
 
@@ -123,7 +123,7 @@
     (define/public (node-info)
       (let-values (((model memory cpus mhz nodes sockets cores threads)
                     (remote-call 'node-get-info)))
-        (hasheq 'model   (->s (list->bytes model))
+        (hasheq 'model   (->str (list->bytes model))
                 'memory  memory
                 'cpus    cpus
                 'mhz     mhz
@@ -136,7 +136,7 @@
     ;; Returns xexpr with system info.
     (define/public (system-info)
       (let-values (((sysinfo) (remote-call 'connect-get-sysinfo 0)))
-        (->x (->s sysinfo))))
+        (->xexpr (->str sysinfo))))
 
 
     ;; Incoming message reader.
