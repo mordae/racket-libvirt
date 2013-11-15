@@ -9,7 +9,6 @@
          racket/match
          racket/class
          racket/dict
-         unstable/error
          tandem
          xdr)
 
@@ -20,12 +19,27 @@
 (provide (all-defined-out))
 
 
+;; Our custom exception type.
+(define-struct (exn:fail:libvirt exn:fail)
+  ())
+
+;; Exception for remote procedure call errors.
+(define-struct (exn:fail:libvirt:error exn:fail:libvirt)
+  ())
+
+;; Exception for network problems.
+(define-struct (exn:fail:libvirt:connection exn:fail:libvirt)
+  ())
+
+
 (define (write-failed (exn #f))
-  (error* 'libvirt "server closed our connection during write"))
+  (throw exn:fail:libvirt:connection
+         'libvirt "server closed our connection during write"))
 
 
 (define (read-failed (exn #f))
-  (error* 'libvirt "server closed our connection during read"))
+  (throw exn:fail:libvirt:connection
+         'libvirt "server closed our connection during read"))
 
 
 ;; Read bytes from given input port or throw an exception if
@@ -134,8 +148,9 @@
           ((cons status value)
            (match status
              ('ok    (vector->values value))
-             ('error (error* method "remote procedure call failed"
-                                    "reason" (vector-ref value 2))))))))
+             ('error (throw exn:fail:libvirt:error
+                            method "remote procedure call failed"
+                                   "reason" (vector-ref value 2))))))))
 
 
     ;; Initialize the parent class.

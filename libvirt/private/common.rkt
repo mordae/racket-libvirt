@@ -10,6 +10,12 @@
 (provide (all-defined-out))
 
 
+;; To make exception raising bearable.
+(define-syntax-rule (throw constructor name message arg ...)
+  (raise-misc-error #:constructor constructor
+                    name message arg ...))
+
+
 ;; Serialize procedure invocations using a private semaphore.
 (define/contract (synchronized proc)
                  (-> procedure? procedure?)
