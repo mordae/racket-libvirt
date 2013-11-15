@@ -10,13 +10,17 @@
          racket/class
          racket/dict
          tandem
+         throw
          xdr)
 
 (require "private/common.rkt"
          "private/protocol.rkt"
          "private/util.rkt")
 
-(provide (all-defined-out))
+(provide libvirt%
+         exn:fail:libvirt?
+         exn:fail:libvirt:error?
+         exn:fail:libvirt:connection?)
 
 
 ;; Our custom exception type.
