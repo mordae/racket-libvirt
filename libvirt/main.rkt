@@ -5,12 +5,12 @@
 
 (require racket/contract
          racket/generator
-         racket/function
          racket/match
          racket/class
-         racket/dict
+         racket/dict)
+
+(require misc1/throw
          tandem
-         throw
          xdr)
 
 (require "private/common.rkt"

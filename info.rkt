@@ -1,6 +1,6 @@
 #lang setup/infotab
 
 (define collection 'multi)
-(define deps '("xdr" "tandem" "throw"))
+(define deps '("base" "scribble-lib" "xdr" "tandem" "misc1"))
 
 ; vim:set ts=2 sw=2 et:

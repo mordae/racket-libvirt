@@ -4,10 +4,10 @@
 ;
 
 (require racket/contract
-         racket/function
-         unstable/error)
+         racket/function)
 
-(provide (all-defined-out))
+(provide
+  (all-defined-out))
 
 
 ;; Serialize procedure invocations using a private semaphore.

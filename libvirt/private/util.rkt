@@ -3,11 +3,11 @@
 ; Misc Utilities
 ;
 
-(require racket/contract
-         racket/string
+(require racket/string
          xml)
 
-(provide (all-defined-out))
+(provide
+  (all-defined-out))
 
 
 ;; String encoding shortcuts.
