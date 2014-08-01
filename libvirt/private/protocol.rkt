@@ -3,403 +3,197 @@
 ; Libvirt Wire Protocol
 ;
 
-(require xdr)
+(require racket/contract
+         racket/generator
+         unstable/socket
+         racket/format
+         racket/match
+         racket/tcp)
 
-(provide (all-defined-out))
+(require misc1/syntax
+         misc1/throw
+         misc1/async
+         tandem
+         xdr)
 
+(require "types.rkt")
 
-;; Information about an RPC call.
-(define-struct call-info (args ret))
+(provide
+  (contract-out
+    (libvirt-connection? predicate/c)
 
+    (current-libvirt-connection
+      (parameter/c libvirt-connection?))
 
-(define message-type
-  (enum '((call           . 0)
-          (reply          . 1)
-          (event          . 2)
-          (stream         . 3)
-          (call-with-fds  . 4)
-          (reply-with-fds . 5))))
+    (make-libvirt-connection
+      (-> input-port? output-port? libvirt-connection?))
 
-(define message-status
-  (enum '((ok       . 0)
-          (error    . 1)
-          (continue . 2))))
+    (libvirt-connect/unix
+      (->* () (unix-socket-path?) libvirt-connection?))
 
-(define remote-procedure
-  (enum '((connect-open . 1)
-          (connect-close . 2)
-          (connect-get-type . 3)
-          (connect-get-version . 4)
-          (connect-get-max-vcpus . 5)
-          (node-get-info . 6)
-          (connect-get-capabilities . 7)
-          (domain-attach-device . 8)
-          (domain-create . 9)
-          (domain-create-xml . 10)
-          (domain-define-xml . 11)
-          (domain-destroy . 12)
-          (domain-detach-device . 13)
-          (domain-get-xml-desc . 14)
-          (domain-get-autostart . 15)
-          (domain-get-info . 16)
-          (domain-get-max-memory . 17)
-          (domain-get-max-vcpus . 18)
-          (domain-get-os-type . 19)
-          (domain-get-vcpus . 20)
-          (connect-list-defined-domains . 21)
-          (domain-lookup-by-id . 22)
-          (domain-lookup-by-name . 23)
-          (domain-lookup-by-uuid . 24)
-          (connect-num-of-defined-domains . 25)
-          (domain-pin-vcpu . 26)
-          (domain-reboot . 27)
-          (domain-resume . 28)
-          (domain-set-autostart . 29)
-          (domain-set-max-memory . 30)
-          (domain-set-memory . 31)
-          (domain-set-vcpus . 32)
-          (domain-shutdown . 33)
-          (domain-suspend . 34)
-          (domain-undefine . 35)
-          (connect-list-defined-networks . 36)
-          (connect-list-domains . 37)
-          (connect-list-networks . 38)
-          (network-create . 39)
-          (network-create-xml . 40)
-          (network-define-xml . 41)
-          (network-destroy . 42)
-          (network-get-xml-desc . 43)
-          (network-get-autostart . 44)
-          (network-get-bridge-name . 45)
-          (network-lookup-by-name . 46)
-          (network-lookup-by-uuid . 47)
-          (network-set-autostart . 48)
-          (network-undefine . 49)
-          (connect-num-of-defined-networks . 50)
-          (connect-num-of-domains . 51)
-          (connect-num-of-networks . 52)
-          (domain-core-dump . 53)
-          (domain-restore . 54)
-          (domain-save . 55)
-          (domain-get-scheduler-type . 56)
-          (domain-get-scheduler-parameters . 57)
-          (domain-set-scheduler-parameters . 58)
-          (connect-get-hostname . 59)
-          (connect-supports-feature . 60)
-          (domain-migrate-prepare . 61)
-          (domain-migrate-perform . 62)
-          (domain-migrate-finish . 63)
-          (domain-block-stats . 64)
-          (domain-interface-stats . 65)
-          (auth-list . 66)
-          (auth-sasl-init . 67)
-          (auth-sasl-start . 68)
-          (auth-sasl-step . 69)
-          (auth-polkit . 70)
-          (connect-num-of-storage-pools . 71)
-          (connect-list-storage-pools . 72)
-          (connect-num-of-defined-storage-pools . 73)
-          (connect-list-defined-storage-pools . 74)
-          (connect-find-storage-pool-sources . 75)
-          (storage-pool-create-xml . 76)
-          (storage-pool-define-xml . 77)
-          (storage-pool-create . 78)
-          (storage-pool-build . 79)
-          (storage-pool-destroy . 80)
-          (storage-pool-delete . 81)
-          (storage-pool-undefine . 82)
-          (storage-pool-refresh . 83)
-          (storage-pool-lookup-by-name . 84)
-          (storage-pool-lookup-by-uuid . 85)
-          (storage-pool-lookup-by-volume . 86)
-          (storage-pool-get-info . 87)
-          (storage-pool-get-xml-desc . 88)
-          (storage-pool-get-autostart . 89)
-          (storage-pool-set-autostart . 90)
-          (storage-pool-num-of-volumes . 91)
-          (storage-pool-list-volumes . 92)
-          (storage-vol-create-xml . 93)
-          (storage-vol-delete . 94)
-          (storage-vol-lookup-by-name . 95)
-          (storage-vol-lookup-by-key . 96)
-          (storage-vol-lookup-by-path . 97)
-          (storage-vol-get-info . 98)
-          (storage-vol-get-xml-desc . 99)
-          (storage-vol-get-path . 100)
-          (node-get-cells-free-memory . 101)
-          (node-get-free-memory . 102)
-          (domain-block-peek . 103)
-          (domain-memory-peek . 104)
-          (connect-domain-event-register . 105)
-          (connect-domain-event-deregister . 106)
-          (domain-event-lifecycle . 107)
-          (domain-migrate-prepare2 . 108)
-          (domain-migrate-finish2 . 109)
-          (connect-get-uri . 110)
-          (node-num-of-devices . 111)
-          (node-list-devices . 112)
-          (node-device-lookup-by-name . 113)
-          (node-device-get-xml-desc . 114)
-          (node-device-get-parent . 115)
-          (node-device-num-of-caps . 116)
-          (node-device-list-caps . 117)
-          (node-device-dettach . 118)
-          (node-device-re-attach . 119)
-          (node-device-reset . 120)
-          (domain-get-security-label . 121)
-          (node-get-security-model . 122)
-          (node-device-create-xml . 123)
-          (node-device-destroy . 124)
-          (storage-vol-create-xml-from . 125)
-          (connect-num-of-interfaces . 126)
-          (connect-list-interfaces . 127)
-          (interface-lookup-by-name . 128)
-          (interface-lookup-by-mac-string . 129)
-          (interface-get-xml-desc . 130)
-          (interface-define-xml . 131)
-          (interface-undefine . 132)
-          (interface-create . 133)
-          (interface-destroy . 134)
-          (connect-domain-xml-from-native . 135)
-          (connect-domain-xml-to-native . 136)
-          (connect-num-of-defined-interfaces . 137)
-          (connect-list-defined-interfaces . 138)
-          (connect-num-of-secrets . 139)
-          (connect-list-secrets . 140)
-          (secret-lookup-by-uuid . 141)
-          (secret-define-xml . 142)
-          (secret-get-xml-desc . 143)
-          (secret-set-value . 144)
-          (secret-get-value . 145)
-          (secret-undefine . 146)
-          (secret-lookup-by-usage . 147)
-          (domain-migrate-prepare-tunnel . 148)
-          (connect-is-secure . 149)
-          (domain-is-active . 150)
-          (domain-is-persistent . 151)
-          (network-is-active . 152)
-          (network-is-persistent . 153)
-          (storage-pool-is-active . 154)
-          (storage-pool-is-persistent . 155)
-          (interface-is-active . 156)
-          (connect-get-lib-version . 157)
-          (connect-compare-cpu . 158)
-          (domain-memory-stats . 159)
-          (domain-attach-device-flags . 160)
-          (domain-detach-device-flags . 161)
-          (connect-baseline-cpu . 162)
-          (domain-get-job-info . 163)
-          (domain-abort-job . 164)
-          (storage-vol-wipe . 165)
-          (domain-migrate-set-max-downtime . 166)
-          (connect-domain-event-register-any . 167)
-          (connect-domain-event-deregister-any . 168)
-          (domain-event-reboot . 169)
-          (domain-event-rtc-change . 170)
-          (domain-event-watchdog . 171)
-          (domain-event-io-error . 172)
-          (domain-event-graphics . 173)
-          (domain-update-device-flags . 174)
-          (nwfilter-lookup-by-name . 175)
-          (nwfilter-lookup-by-uuid . 176)
-          (nwfilter-get-xml-desc . 177)
-          (connect-num-of-nwfilters . 178)
-          (connect-list-nwfilters . 179)
-          (nwfilter-define-xml . 180)
-          (nwfilter-undefine . 181)
-          (domain-managed-save . 182)
-          (domain-has-managed-save-image . 183)
-          (domain-managed-save-remove . 184)
-          (domain-snapshot-create-xml . 185)
-          (domain-snapshot-get-xml-desc . 186)
-          (domain-snapshot-num . 187)
-          (domain-snapshot-list-names . 188)
-          (domain-snapshot-lookup-by-name . 189)
-          (domain-has-current-snapshot . 190)
-          (domain-snapshot-current . 191)
-          (domain-revert-to-snapshot . 192)
-          (domain-snapshot-delete . 193)
-          (domain-get-block-info . 194)
-          (domain-event-io-error-reason . 195)
-          (domain-create-with-flags . 196)
-          (domain-set-memory-parameters . 197)
-          (domain-get-memory-parameters . 198)
-          (domain-set-vcpus-flags . 199)
-          (domain-get-vcpus-flags . 200)
-          (domain-open-console . 201)
-          (domain-is-updated . 202)
-          (connect-get-sysinfo . 203)
-          (domain-set-memory-flags . 204)
-          (domain-set-blkio-parameters . 205)
-          (domain-get-blkio-parameters . 206)
-          (domain-migrate-set-max-speed . 207)
-          (storage-vol-upload . 208)
-          (storage-vol-download . 209)
-          (domain-inject-nmi . 210)
-          (domain-screenshot . 211)
-          (domain-get-state . 212)
-          (domain-migrate-begin3 . 213)
-          (domain-migrate-prepare3 . 214)
-          (domain-migrate-prepare-tunnel3 . 215)
-          (domain-migrate-perform3 . 216)
-          (domain-migrate-finish3 . 217)
-          (domain-migrate-confirm3 . 218)
-          (domain-set-scheduler-parameters-flags . 219)
-          (interface-change-begin . 220)
-          (interface-change-commit . 221)
-          (interface-change-rollback . 222)
-          (domain-get-scheduler-parameters-flags . 223)
-          (domain-event-control-error . 224)
-          (domain-pin-vcpu-flags . 225)
-          (domain-send-key . 226)
-          (node-get-cpu-stats . 227)
-          (node-get-memory-stats . 228)
-          (domain-get-control-info . 229)
-          (domain-get-vcpu-pin-info . 230)
-          (domain-undefine-flags . 231)
-          (domain-save-flags . 232)
-          (domain-restore-flags . 233)
-          (domain-destroy-flags . 234)
-          (domain-save-image-get-xml-desc . 235)
-          (domain-save-image-define-xml . 236)
-          (domain-block-job-abort . 237)
-          (domain-get-block-job-info . 238)
-          (domain-block-job-set-speed . 239)
-          (domain-block-pull . 240)
-          (domain-event-block-job . 241)
-          (domain-migrate-get-max-speed . 242)
-          (domain-block-stats-flags . 243)
-          (domain-snapshot-get-parent . 244)
-          (domain-reset . 245)
-          (domain-snapshot-num-children . 246)
-          (domain-snapshot-list-children-names . 247)
-          (domain-event-disk-change . 248)
-          (domain-open-graphics . 249)
-          (node-suspend-for-duration . 250)
-          (domain-block-resize . 251)
-          (domain-set-block-io-tune . 252)
-          (domain-get-block-io-tune . 253)
-          (domain-set-numa-parameters . 254)
-          (domain-get-numa-parameters . 255)
-          (domain-set-interface-parameters . 256)
-          (domain-get-interface-parameters . 257)
-          (domain-shutdown-flags . 258)
-          (storage-vol-wipe-pattern . 259)
-          (storage-vol-resize . 260)
-          (domain-pm-suspend-for-duration . 261)
-          (domain-get-cpu-stats . 262)
-          (domain-get-disk-errors . 263)
-          (domain-set-metadata . 264)
-          (domain-get-metadata . 265)
-          (domain-block-rebase . 266)
-          (domain-pm-wakeup . 267)
-          (domain-event-tray-change . 268)
-          (domain-event-pmwakeup . 269)
-          (domain-event-pmsuspend . 270)
-          (domain-snapshot-is-current . 271)
-          (domain-snapshot-has-metadata . 272)
-          (connect-list-all-domains . 273)
-          (domain-list-all-snapshots . 274)
-          (domain-snapshot-list-all-children . 275)
-          (domain-event-balloon-change . 276)
-          (domain-get-hostname . 277)
-          (domain-get-security-label-list . 278)
-          (domain-pin-emulator . 279)
-          (domain-get-emulator-pin-info . 280)
-          (connect-list-all-storage-pools . 281)
-          (storage-pool-list-all-volumes . 282)
-          (connect-list-all-networks . 283)
-          (connect-list-all-interfaces . 284)
-          (connect-list-all-node-devices . 285)
-          (connect-list-all-nwfilters . 286)
-          (connect-list-all-secrets . 287)
-          (node-set-memory-parameters . 288)
-          (node-get-memory-parameters . 289)
-          (domain-block-commit . 290)
-          (network-update . 291)
-          (domain-event-pmsuspend-disk . 292)
-          (node-get-cpu-map . 293)
-          (domain-fstrim . 294)
-          (domain-send-process-signal . 295)
-          (domain-open-channel . 296)
-          (node-device-lookup-scsi-host-by-wwn . 297)
-          (domain-get-job-stats . 298)
-          (domain-migrate-get-compression-cache . 299)
-          (domain-migrate-set-compression-cache . 300)
-          (node-device-detach-flags . 301)
-          (domain-migrate-begin3-params . 302)
-          (domain-migrate-prepare3-params . 303)
-          (domain-migrate-prepare-tunnel3-params . 304)
-          (domain-migrate-perform3-params . 305)
-          (domain-migrate-finish3-params . 306)
-          (domain-migrate-confirm3-params . 307)
-          (domain-set-memory-stats-period . 308))))
+    (libvirt-connect/tcp
+      (->* () (string? port/c string? port/c) libvirt-connection?))))
 
-(define remote-typed-param-type
-  (enum '((int     . 1)
-          (uint    . 2)
-          (llong   . 3)
-          (ullong  . 4)
-          (double  . 5)
-          (boolean . 6)
-          (string  . 7))))
-
-(define remote-auth-type
-  (enum '((none   . 0)
-          (sasl   . 1)
-          (polkit . 2))))
+(provide define-libvirt-caller)
 
 
-(define remote-nonnull-string (opaque* 4194304))
-(define remote-string (optional remote-nonnull-string))
-(define remote-uuid (opaque 16))
+(define port/c
+  (integer-in 1 65535))
 
 
-(define remote-program #x20008086)
-(define remote-version 1)
+(struct libvirt-connection
+  (tandem))
+
+(struct packet
+  (type procno status payload)
+  #:transparent)
 
 
-(define message-header
-  (structure uint uint remote-procedure message-type uint message-status))
-
-(define remote-nonnull-domain
-  (structure remote-nonnull-string remote-uuid int))
-
-(define remote-domain
-  (optional remote-nonnull-domain))
-
-(define remote-nonnull-network
-  (structure remote-nonnull-string remote-uuid))
-
-(define remote-network
-  (optional remote-nonnull-network))
-
-(define remote-error
-  (structure int int remote-string int remote-domain remote-string
-             remote-string remote-string int int remote-network))
+(define current-libvirt-connection
+  (make-parameter #f))
 
 
-(define remote-calls
-  (hasheq
-    'connect-open
-    (call-info (structure remote-string uint)
-               (structure))
+;; Connection with user-defined input and output ports.
+(define (make-libvirt-connection in out)
+  (let ((lock (make-semaphore 1)))
+    (libvirt-connection (libvirt-tandem in out))))
 
-    'connect-close
-    (call-info (structure)
-               (structure))
 
-    'node-get-info
-    (call-info (structure)
-               (structure (array uint 32) long int int int int int int))
+;; Shortcut for tcp-based connections, defaulting to local libvirtd.
+(define (libvirt-connect/tcp (host "127.0.0.1")
+                             (port 16509)
+                             (local-host #f)
+                             (local-port #f))
+  (let-values (((in out) (tcp-connect host port local-host local-port)))
+    (make-libvirt-connection in out)))
 
-    'connect-get-sysinfo
-    (call-info (structure uint)
-               (structure remote-nonnull-string))
 
-    'auth-list
-    (call-info (structure)
-               (structure (array* remote-auth-type 20)))))
+;; Shortcut for domain socket connections, defaulting to local libvirtd.
+(define (libvirt-connect/unix (path "/var/run/libvirt/libvirt-sock"))
+  (let-values (((in out) (unix-socket-connect path)))
+    (make-libvirt-connection in out)))
+
+
+;; Create tandem for those streams.
+(define (libvirt-tandem in out)
+  (let ((wlock (make-semaphore 1)))
+    (tandem (async/loop
+              (read-packet in))
+            (λ (tag value)
+              (with-semaphore wlock
+                (write-packet tag value out))))))
+
+
+;; Consume a packet from the input stream, using the libvirt's
+;; framing protocol of 4-byte prefix followed by the data,
+;; where length specified in the prefix includes itself.
+(define (read-packet in)
+  (let ((length (- (load uint in) 4)))
+    (decode-packet
+      (read-bytes length in))))
+
+
+;; Decode byte string to a packet structure.
+(define (decode-packet bstr)
+  (match (load/bytes message-header bstr)
+    ((vector (and program (not REMOTE-PROGRAM)) _ _ _ _ _)
+     (throw exn:fail 'libvirt "unrecognized peer program"
+                     "expected" (~s REMOTE-PROGRAM)
+                     "received" (~s program)))
+
+    ((vector _ (and version (not REMOTE-VERSION)) _ _ _ _)
+     (throw exn:fail 'libvirt "protocol version mismatch"
+                     "expected" (~s REMOTE-VERSION)
+                     "received" (~s version)))
+
+    ((vector _ _ procno type serial status)
+     (values serial (packet type procno status (subbytes bstr 24))))))
+
+
+;; Encodes `packet` structure and writes it to the output
+;; stream using correct framing.
+(define (write-packet tag value out)
+  (let* ((bstr (with-output-bytes
+                 (dump message-header (packet-header tag value))
+                 (write-bytes (packet-payload value))))
+         (length (bytes-length bstr)))
+    (dump uint (+ 4 length) out)
+    (write-bytes bstr out)
+    (flush-output out)))
+
+
+;; Create header vector for given packet structure,
+;; with tag interpreted as the sequence number.
+(define (packet-header tag value)
+  (match-let (((packet type procno status _) value))
+    (vector REMOTE-PROGRAM REMOTE-VERSION procno type tag status)))
+
+
+;; Use to obtain new sequence number.
+(define next-sequence-number
+  (let ((lock (make-semaphore 1))
+        (next (generator ()
+                (for ((i (in-cycle (in-range 1 2147483648))))
+                  (yield i)))))
+    (λ ()
+      (with-semaphore lock
+        (next)))))
+
+
+;; Define procedure that will use use `current-libvirt-connection`
+;; to perform a remote procedure call.
+(define-syntax define-libvirt-caller
+  (syntax-rules ()
+    ((_ name procno (arg ...) ret)
+     (begin
+       (provide
+         (contract-out
+           (name (-> (type-value/c arg) ... (type-value/c ret)))))
+       (define name
+         (procedure-rename
+           (make-caller 'name procno ret arg ...)
+           'name))))
+
+    ((_ name procno (arg ...) ret wrap)
+     (begin
+       (provide
+         (contract-out
+           (name (-> (type-value/c arg) ... (type-value/c ret)))))
+       (define name
+         (procedure-rename
+           (wrap
+             (make-caller 'name procno ret arg ...))
+           'name))))))
+
+
+;; Create caller procedure with specified types.
+(define (make-caller name procno ret-type . arg-types)
+  (let ((args-type (apply structure arg-types)))
+    (λ args
+      (unless (current-libvirt-connection)
+        (throw exn:fail name "not connected to libvirt"
+                        "(current-libvirt-connection)" (~s #f)))
+
+      (define payload
+        (dump/bytes args-type (list->vector args)))
+
+      (define reply
+        (sync
+          (tandem-call-evt (libvirt-connection-tandem
+                             (current-libvirt-connection))
+                           (next-sequence-number)
+                           (packet 'call procno 'ok payload))))
+
+      (match-let (((packet _ _ status bstr) reply))
+        (when (eq? status 'error)
+          (raise-libvirt-error name (load/bytes remote-error bstr))))
+
+      (load/bytes ret-type (packet-payload reply)))))
+
+
+(define (raise-libvirt-error name error)
+  (match-let (((vector code domain message level _ ...) error))
+    (throw exn:fail name (if (void? message) "error" message))))
 
 
 ; vim:set ts=2 sw=2 et:
