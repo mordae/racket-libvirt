@@ -3,12 +3,16 @@
 ; Libvirt Client
 ;
 
-(require racket/contract)
+(require racket/contract
+         racket/string
+         racket/match
+         xml)
 
-(require xdr)
+(require
+  (only-in xdr int/c uint/c size/c long/c ulong/c))
 
-(require "private/protocol.rkt"
-         "private/types.rkt")
+(require "private/api.rkt"
+         "private/protocol.rkt")
 
 (provide libvirt-connection?
          current-libvirt-connection
@@ -16,14 +20,59 @@
          libvirt-connect/unix
          libvirt-connect/tcp)
 
+(provide
+  (prefix-out libvirt- close)
+  (prefix-out libvirt- auth-list))
 
-(define-libvirt-caller connect-open 1 (remote-string uint) nothing)
-(define-libvirt-caller connect-close 2 () nothing)
-(define-libvirt-caller connect-get-sysinfo 203 (uint) remote-nonnull-string)
+(provide
+  (contract-out
+    (libvirt-open (->* (string?) (ulong/c) void?))
+    (libvirt-node-info (-> (hash/c symbol? (or/c string? integer?))))
+    (libvirt-system-info (-> xexpr/c))))
 
-(define-libvirt-caller auth-list 66 () (array* remote-auth-type 20))
 
-(define-libvirt-caller node-get-info 6 () remote-node-info)
+(define (libvirt-open conn (flags 0))
+  (open conn flags))
+
+
+;; Turn #"x86_64\0\0" into "x86_64".
+(define (c-bytes->string/utf-8 bstr)
+  (car (string-split (bytes->string/utf-8 bstr) "\0")))
+
+
+;; Remove (or trim) whitespace from an xexpr.
+(define (strip-whitespace xexpr)
+  (match xexpr
+    ((cons (regexp #px"^\\s+$") tail)
+     (strip-whitespace tail))
+
+    ((cons (and head (regexp #px"(^\\s|\\s$)")) tail)
+     (cons (string-trim head)
+           (strip-whitespace tail)))
+
+    ((cons head tail)
+     (cons (strip-whitespace head)
+           (strip-whitespace tail)))
+
+    (else xexpr)))
+
+
+(define (libvirt-node-info)
+  (match-let (((vector model memory cpus mhz nodes sockets cores threads)
+               (node-info)))
+    (hasheq 'model (c-bytes->string/utf-8
+                     (apply bytes model))
+            'memory memory
+            'cpus cpus
+            'mhz mhz
+            'nodes nodes
+            'sockets sockets
+            'cores cores
+            'threads threads)))
+
+
+(define (libvirt-system-info)
+  (strip-whitespace (string->xexpr (system-info 0))))
 
 
 ; vim:set ts=2 sw=2 et:

@@ -34,7 +34,8 @@
     (libvirt-connect/tcp
       (->* () (string? port/c string? port/c) libvirt-connection?))))
 
-(provide define-libvirt-caller)
+(provide define-caller
+         define-callers)
 
 
 (define port/c
@@ -142,28 +143,18 @@
 
 ;; Define procedure that will use use `current-libvirt-connection`
 ;; to perform a remote procedure call.
-(define-syntax define-libvirt-caller
-  (syntax-rules ()
-    ((_ name procno (arg ...) ret)
-     (begin
-       (provide
-         (contract-out
-           (name (-> (type-value/c arg) ... (type-value/c ret)))))
-       (define name
-         (procedure-rename
-           (make-caller 'name procno ret arg ...)
-           'name))))
+(define-syntax-rule (define-caller name procno (arg ...) ret)
+  (begin
+    (provide
+      (contract-out
+        (name (-> (type-value/c arg) ... (type-value/c ret)))))
+    (define name
+      (procedure-rename (make-caller 'name procno ret arg ...) 'name))))
 
-    ((_ name procno (arg ...) ret wrap)
-     (begin
-       (provide
-         (contract-out
-           (name (-> (type-value/c arg) ... (type-value/c ret)))))
-       (define name
-         (procedure-rename
-           (wrap
-             (make-caller 'name procno ret arg ...))
-           'name))))))
+;; Massive variant of the above form.
+(define-syntax-rule (define-callers (name procno (arg ...) ret) ...)
+  (begin
+    (define-caller name procno (arg ...) ret) ...))
 
 
 ;; Create caller procedure with specified types.
