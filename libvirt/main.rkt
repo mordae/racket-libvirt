@@ -36,6 +36,9 @@
     (rename libvirt-system-info/wrap libvirt-system-info
             (-> xexpr/c))
 
+    (rename libvirt-capabilities/wrap libvirt-capabilities
+            (-> xexpr/c))
+
     (libvirt-uuid (-> string?))))
 
 
@@ -83,10 +86,13 @@
   (strip-whitespace (string->xexpr (libvirt-system-info 0))))
 
 
+(define (libvirt-capabilities/wrap)
+  (strip-whitespace (string->xexpr (libvirt-capabilities))))
+
+
 (define (libvirt-uuid)
   (string-downcase
-    (xexpr-path-text '(system entry (name "uuid") *)
-                     (libvirt-system-info/wrap))))
+    (xexpr-path-text '(host uuid *) (libvirt-capabilities/wrap))))
 
 
 ; vim:set ts=2 sw=2 et:
