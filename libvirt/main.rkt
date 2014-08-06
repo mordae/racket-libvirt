@@ -20,19 +20,23 @@
          libvirt-connect/unix
          libvirt-connect/tcp)
 
-(provide
-  (prefix-out libvirt- close)
-  (prefix-out libvirt- auth-list))
+(provide libvirt-close
+         libvirt-auth-list)
 
 (provide
   (contract-out
-    (libvirt-open (->* (string?) (ulong/c) void?))
-    (libvirt-node-info (-> (hash/c symbol? (or/c string? integer?))))
-    (libvirt-system-info (-> xexpr/c))))
+    (rename libvirt-open/wrap libvirt-open
+            (->* (string?) (ulong/c) void?))
+
+    (rename libvirt-node-info/wrap libvirt-node-info
+            (-> (hash/c symbol? (or/c string? integer?))))
+
+    (rename libvirt-system-info/wrap libvirt-system-info
+            (-> xexpr/c))))
 
 
-(define (libvirt-open conn (flags 0))
-  (open conn flags))
+(define (libvirt-open/wrap conn (flags 0))
+  (libvirt-open conn flags))
 
 
 ;; Turn #"x86_64\0\0" into "x86_64".
@@ -57,9 +61,9 @@
     (else xexpr)))
 
 
-(define (libvirt-node-info)
+(define (libvirt-node-info/wrap)
   (match-let (((vector model memory cpus mhz nodes sockets cores threads)
-               (node-info)))
+               (libvirt-node-info)))
     (hasheq 'model (c-bytes->string/utf-8
                      (apply bytes model))
             'memory memory
@@ -71,8 +75,8 @@
             'threads threads)))
 
 
-(define (libvirt-system-info)
-  (strip-whitespace (string->xexpr (system-info 0))))
+(define (libvirt-system-info/wrap)
+  (strip-whitespace (string->xexpr (libvirt-system-info 0))))
 
 
 ; vim:set ts=2 sw=2 et:
