@@ -8,6 +8,8 @@
          racket/match
          xml)
 
+(require xexpr-path)
+
 (require
   (only-in xdr int/c uint/c size/c long/c ulong/c))
 
@@ -32,7 +34,9 @@
             (-> (hash/c symbol? (or/c string? integer?))))
 
     (rename libvirt-system-info/wrap libvirt-system-info
-            (-> xexpr/c))))
+            (-> xexpr/c))
+
+    (libvirt-uuid (-> string?))))
 
 
 (define (libvirt-open/wrap conn (flags 0))
@@ -77,6 +81,12 @@
 
 (define (libvirt-system-info/wrap)
   (strip-whitespace (string->xexpr (libvirt-system-info 0))))
+
+
+(define (libvirt-uuid)
+  (string-downcase
+    (xexpr-path-text '(system entry (name "uuid") *)
+                     (libvirt-system-info/wrap))))
 
 
 ; vim:set ts=2 sw=2 et:
