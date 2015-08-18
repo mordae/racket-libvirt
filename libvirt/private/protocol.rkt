@@ -5,7 +5,7 @@
 
 (require racket/contract
          racket/generator
-         unstable/socket
+         racket/unix-socket
          racket/format
          racket/match
          racket/tcp)
